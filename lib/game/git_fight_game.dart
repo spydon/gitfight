@@ -37,7 +37,12 @@ class GitFightGame extends FlameGame {
 
   /// Keeps the fleet clear of the planet in radial formations.
   static const _innerRadius = 100.0;
-  static const _formationCount = 6;
+
+  /// Spacing that keeps ships from sitting on top of each other: [_ringGap]
+  /// between concentric rings, [_arcGap] between neighbours along a ring/grid.
+  static const _ringGap = 52.0;
+  static const _arcGap = 46.0;
+  static const _formationCount = 7;
 
   final GitService _service;
   final StatsService _stats;
@@ -282,50 +287,100 @@ class GitFightGame extends FlameGame {
   }
 
   /// Position of slot [i] of [n] ships in the current formation at time [t].
+  ///
+  /// Formations are kept symmetric and evenly spaced (no overlaps), with a
+  /// small deterministic per-ship jitter so they never look perfectly
+  /// mechanical.
   Vector2 _formationPosition(int i, int n, double t) {
-    final r = 130 + math.sqrt(n) * 24;
+    final jr = _jitter(i, 6);
+    final ja = _jitter(i * 31 + 7, 0.05);
+
     switch (_formationType) {
-      case 1: // Rotating galaxy spiral.
-        final angle = i * _goldenAngle + t * 0.3;
+      case 1: // Breathing concentric rings.
+        final slot = _ringSlot(i);
         final radius =
-            _innerRadius + (r - _innerRadius) * math.sqrt((i + 0.5) / n);
-        return Vector2(math.cos(angle) * radius, math.sin(angle) * radius);
-      case 2: // Breathing, counter-rotating concentric rings.
-        final rings = math.max(1, math.sqrt(n).round());
-        final ring = i % rings;
-        final perRing = (n / rings).ceil();
-        final idx = i ~/ rings;
-        final radius =
-            (_innerRadius + (r - _innerRadius) * (ring + 1) / rings) *
-            (1 + 0.16 * math.sin(t * 1.6 + ring * 0.9));
-        final dir = ring.isEven ? 1 : -1;
-        final angle = 2 * math.pi * idx / math.max(1, perRing) + t * 0.5 * dir;
-        return Vector2(math.cos(angle) * radius, math.sin(angle) * radius);
-      case 3: // Lissajous swarm sweeping across the centre.
-        final phase = 2 * math.pi * i / n;
-        return Vector2(
-          r * math.sin(t * 0.6 + phase * 3),
-          r * 0.72 * math.sin(t * 0.8 + phase * 2),
-        );
-      case 4: // Slowly rotating grid.
+            (slot.radius + jr) * (1 + 0.05 * math.sin(t * 1.4 + slot.ring));
+        final angle = slot.angle + ja + t * 0.22;
+        return _polar(radius, angle);
+      case 2: // Swirl: each ring twisted and rotating for a galaxy sweep.
+        final slot = _ringSlot(i);
+        final angle = slot.angle + ja + t * 0.3 + slot.ring * 0.18;
+        return _polar(slot.radius + jr, angle);
+      case 3: // Sunflower spiral (organic, evenly spread).
+        final radius = _innerRadius + 24 * math.sqrt(i.toDouble()) + jr;
+        final angle = i * _goldenAngle + ja + t * 0.25;
+        return _polar(radius, angle);
+      case 4: // Slowly rotating square grid.
         final cols = math.max(1, math.sqrt(n).ceil());
         final rows = (n / cols).ceil();
-        final spacing = 2 * r / math.max(1, math.max(cols, rows));
-        final gx = ((i % cols) - (cols - 1) / 2) * spacing;
-        final gy = ((i ~/ cols) - (rows - 1) / 2) * spacing;
-        final ca = math.cos(t * 0.2);
-        final sa = math.sin(t * 0.2);
+        final gx = ((i % cols) - (cols - 1) / 2) * _arcGap + jr;
+        final gy = ((i ~/ cols) - (rows - 1) / 2) * _arcGap + jr;
+        final ca = math.cos(t * 0.18);
+        final sa = math.sin(t * 0.18);
         return Vector2(gx * ca - gy * sa, gx * sa + gy * ca);
-      case 5: // Rotating travelling wave.
-        final x = n <= 1 ? 0.0 : (i / (n - 1) - 0.5) * 2 * r;
-        final y = r * 0.45 * math.sin(x * 0.025 + t * 1.6);
-        final ca = math.cos(t * 0.12);
-        final sa = math.sin(t * 0.12);
-        return Vector2(x * ca - y * sa, x * sa + y * ca);
-      default: // Orbiting ring.
-        final angle = 2 * math.pi * i / n + t * 0.35;
-        return Vector2(math.cos(angle) * r, math.sin(angle) * r);
+      case 5: // Flower: ring radius bends into rotating petals.
+        final slot = _ringSlot(i);
+        final radius =
+            slot.radius + jr + 18 * math.sin(6 * slot.angle + t * 0.6);
+        final angle = slot.angle + ja + t * 0.15;
+        return _polar(radius, angle);
+      case 6: // Ripple: rings pulse outward like rings on water.
+        final slot = _ringSlot(i);
+        final radius =
+            slot.radius + jr + 14 * math.sin(slot.ring * 0.9 - t * 2);
+        final angle = slot.angle + ja + t * 0.12 * (slot.ring.isEven ? 1 : -1);
+        return _polar(radius, angle);
+      default: // Radar: counter-rotating concentric rings.
+        final slot = _ringSlot(i);
+        final dir = slot.ring.isEven ? 1 : -1;
+        final angle = slot.angle + ja + t * 0.3 * dir;
+        return _polar(slot.radius + jr, angle);
     }
+  }
+
+  Vector2 _polar(double radius, double angle) =>
+      Vector2(math.cos(angle) * radius, math.sin(angle) * radius);
+
+  /// Places slot [i] on a concentric-ring layout where each ring holds as many
+  /// ships as fit around it with [_arcGap] spacing, so nothing overlaps.
+  ({double radius, double angle, int ring}) _ringSlot(int i) {
+    var ring = 0;
+    var placed = 0;
+    while (true) {
+      final radius = _innerRadius + ring * _ringGap;
+      final capacity = math.max(1, (2 * math.pi * radius / _arcGap).floor());
+      if (i - placed < capacity) {
+        return (
+          radius: radius,
+          angle: 2 * math.pi * (i - placed) / capacity,
+          ring: ring,
+        );
+      }
+      placed += capacity;
+      ring++;
+    }
+  }
+
+  /// Deterministic jitter in [-amount, amount] from an integer [seed].
+  double _jitter(int seed, double amount) {
+    final hashed = (seed * 2654435761) & 0x7fffffff;
+    return (hashed % 1000 / 1000 - 0.5) * 2 * amount;
+  }
+
+  /// The radius the fleet occupies for [n] ships, used to frame the camera.
+  double _layoutRadius(int n) {
+    var ring = 0;
+    var placed = 0;
+    while (placed < n) {
+      final radius = _innerRadius + ring * _ringGap;
+      placed += math.max(1, (2 * math.pi * radius / _arcGap).floor());
+      ring++;
+    }
+    final ringOuter = (_innerRadius + math.max(0, ring - 1) * _ringGap) * 1.12;
+    final spiralOuter = _innerRadius + 24 * math.sqrt(n.toDouble());
+    final cols = math.max(1, math.sqrt(n).ceil());
+    final gridOuter = cols * _arcGap / 2 * math.sqrt2;
+    return math.max(ringOuter, math.max(spiralOuter, gridOuter));
   }
 
   void _processCommit(int i) {
@@ -476,8 +531,7 @@ class GitFightGame extends FlameGame {
   }
 
   void _fitCamera() {
-    final r = 130 + math.sqrt(math.max(1, _spawnCount)) * 24;
-    _viewExtent = r * 1.5 + 70;
+    _viewExtent = _layoutRadius(math.max(1, _spawnCount)) + 80;
     final shortest = math.min(size.x, size.y);
     if (shortest <= 0) {
       return;

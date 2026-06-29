@@ -72,6 +72,7 @@ class GitFightGame extends FlameGame {
   double speed = 1.0;
   bool _playing = false;
   bool _live = false;
+  bool _streamComplete = false;
 
   String? _url;
   DateTime? _liveSince;
@@ -112,20 +113,46 @@ class GitFightGame extends FlameGame {
     error.value = null;
     overlays.remove(entryOverlay);
     overlays.add(loadingOverlay);
+    var started = false;
     try {
-      final history = await _service.fetchHistory(url);
-      _url = url;
-      _liveSince = history.last.date;
-      _liveStarted = false;
-      _liveTimer?.cancel();
-      start(history);
-      overlays.remove(loadingOverlay);
-      overlays.add(hudOverlay);
-      _refreshLaunches();
+      await for (final batch in _service.streamHistory(url)) {
+        if (batch.isEmpty) {
+          continue;
+        }
+        if (!started) {
+          started = true;
+          _url = url;
+          _liveStarted = false;
+          _liveTimer?.cancel();
+          start(batch);
+          overlays.remove(loadingOverlay);
+          overlays.add(hudOverlay);
+          _refreshLaunches();
+        } else {
+          _appendHistory(batch);
+        }
+      }
+      if (!started) {
+        throw GitFetchException('No commits found for this repository.');
+      }
+      _completeStream();
     } on GitFetchException catch (e) {
-      _reopenEntry(e.message);
+      started ? _completeStream() : _reopenEntry(e.message);
     } on Object catch (_) {
-      _reopenEntry('Could not reach the host. Check the URL.');
+      started
+          ? _completeStream()
+          : _reopenEntry('Could not reach the host. Check the URL.');
+    }
+  }
+
+  void _appendHistory(List<GitCommit> batch) {
+    _timeline = [..._timeline, ...batch];
+  }
+
+  void _completeStream() {
+    _streamComplete = true;
+    if (_timeline.isNotEmpty) {
+      _liveSince = _timeline.last.date;
     }
   }
 
@@ -195,6 +222,7 @@ class GitFightGame extends FlameGame {
     _spawnCount = 0;
     _playing = true;
     _live = false;
+    _streamComplete = false;
     finished.value = false;
     live.value = false;
     progress.value = 0;
@@ -257,7 +285,8 @@ class GitFightGame extends FlameGame {
     progress.value = _index / _timeline.length;
     if (_index < _timeline.length) {
       currentDate.value = _timeline[_index].date;
-    } else if (_playing) {
+    } else if (_playing && _streamComplete) {
+      // Caught up and nothing more will stream in: history is done.
       _playing = false;
       finished.value = true;
       goLive();

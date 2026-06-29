@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:gitfight/git/git_commit.dart';
@@ -10,10 +11,9 @@ import 'package:http/http.dart' as http;
 /// gets the cached data instead of hitting the host again.
 ///
 /// The function fetches from the canonical host server-side and is the only
-/// writer to the cache, so clients cannot poison it. We call it over plain
-/// HTTP (no Supabase SDK) to keep the WebAssembly build clean. Live polling
-/// ([fetchSince]) still goes straight to the host, since per-session "what is
-/// new right now" is not worth caching.
+/// writer to the cache, so clients cannot poison it. To make the first load
+/// fast, a cache hit is served whole, while a cache miss streams straight from
+/// the host (oldest first) and kicks off a background cache fill for next time.
 class SupabaseGitService extends GitService {
   SupabaseGitService({super.maxCommits, http.Client? client})
     : _client = client ?? http.Client();
@@ -21,37 +21,69 @@ class SupabaseGitService extends GitService {
   final http.Client _client;
 
   @override
-  Future<List<GitCommit>> fetchHistory(String rawUrl) async {
+  Stream<List<GitCommit>> streamHistory(String rawUrl) async* {
+    Map<String, dynamic>? cache;
     try {
-      final response = await _client.post(
-        SupabaseConfig.functionUrl('fetch-repo'),
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': SupabaseConfig.publishableKey,
-          'Authorization': 'Bearer ${SupabaseConfig.publishableKey}',
-        },
-        body: jsonEncode({'url': rawUrl}),
-      );
-      final data = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        return _parseCommits(data);
-      }
-      // A clear error from the function (e.g. repo not found) is shown as-is;
-      // anything else means the cache is unavailable, so fall back to the host.
-      final message = data is Map ? data['error'] : null;
-      if (message != null) {
-        throw GitFetchException(message.toString());
-      }
-      return super.fetchHistory(rawUrl);
+      cache = await _invoke({'url': rawUrl, 'cacheOnly': true});
     } on GitFetchException {
       rethrow;
-    } on Object catch (_) {
+    } on Object {
+      cache = null; // Function unreachable; fall back to streaming from host.
+    }
+
+    if (cache != null && cache['cached'] == true) {
+      yield _parseCommits(cache);
+      return;
+    }
+
+    // Cache miss: fill it server-side for next time (without double-counting
+    // the launch), and stream from the host right now.
+    unawaited(_populate(rawUrl));
+    yield* streamFromHost(rawUrl);
+  }
+
+  @override
+  Future<List<GitCommit>> fetchHistory(String rawUrl) async {
+    try {
+      return _parseCommits(await _invoke({'url': rawUrl}));
+    } on GitFetchException {
+      rethrow;
+    } on Object {
       return super.fetchHistory(rawUrl);
     }
   }
 
-  List<GitCommit> _parseCommits(dynamic data) {
-    final list = data is Map ? data['commits'] as List? : null;
+  Future<void> _populate(String rawUrl) async {
+    try {
+      await _invoke({'url': rawUrl, 'count': false});
+    } on Object {
+      // Best effort; the cache simply stays empty for next time.
+    }
+  }
+
+  Future<Map<String, dynamic>> _invoke(Map<String, dynamic> body) async {
+    final response = await _client.post(
+      SupabaseConfig.functionUrl('fetch-repo'),
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SupabaseConfig.publishableKey,
+        'Authorization': 'Bearer ${SupabaseConfig.publishableKey}',
+      },
+      body: jsonEncode(body),
+    );
+    final data = jsonDecode(response.body);
+    if (response.statusCode == 200 && data is Map<String, dynamic>) {
+      return data;
+    }
+    final message = data is Map ? data['error'] : null;
+    if (message != null) {
+      throw GitFetchException(message.toString());
+    }
+    throw Exception('Cache request failed (${response.statusCode}).');
+  }
+
+  List<GitCommit> _parseCommits(Map<String, dynamic> data) {
+    final list = data['commits'] as List?;
     if (list == null) {
       throw GitFetchException('Unexpected response from the cache.');
     }

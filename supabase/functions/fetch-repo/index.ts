@@ -216,14 +216,23 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
   try {
-    const repo = parseRepo((await req.json())?.url);
+    const payload = await req.json();
+    const repo = parseRepo(payload?.url);
+    // cacheOnly returns immediately on a miss so the client can stream from the
+    // host instead of waiting for a full server-side fetch. count=false skips
+    // the launch counter (used by the background cache fill after a miss).
+    const cacheOnly = payload?.cacheOnly === true;
+    const shouldCount = payload?.count !== false;
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Count this launch (one bump per "Launch" press, cache hit or miss).
-    const { data: launches } = await supabase.rpc("increment_launches");
+    let launches: number | null = null;
+    if (shouldCount) {
+      const { data } = await supabase.rpc("increment_launches");
+      launches = data;
+    }
 
     const { data: cached } = await supabase
       .from("repo_cache")
@@ -233,6 +242,10 @@ Deno.serve(async (req) => {
 
     if (cached && Date.now() - new Date(cached.fetched_at).getTime() < TTL_MS) {
       return json({ commits: cached.commits, cached: true, launches });
+    }
+
+    if (cacheOnly) {
+      return json({ cached: false, miss: true, launches });
     }
 
     const commits = await fetchCommits(repo);

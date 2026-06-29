@@ -74,6 +74,104 @@ class GitService {
     return fresh;
   }
 
+  /// Streams the history in oldest-first chunks so the replay can begin before
+  /// the whole repository has loaded. The default just yields [fetchHistory] in
+  /// one go; subclasses and [streamFromHost] provide real streaming.
+  Stream<List<GitCommit>> streamHistory(String rawUrl) async* {
+    yield await fetchHistory(rawUrl);
+  }
+
+  /// Streams commits straight from the host, oldest first. GitHub and GitLab
+  /// are paged from the last (oldest) page backwards so the first chunk arrives
+  /// quickly; Bitbucket has no backwards paging, so it yields once at the end.
+  Stream<List<GitCommit>> streamFromHost(String rawUrl) async* {
+    final repo = _parse(rawUrl);
+    switch (repo.host) {
+      case _Host.github:
+        yield* _streamGitHub(repo);
+      case _Host.gitlab:
+        yield* _streamGitLab(repo);
+      case _Host.bitbucket:
+        final all = await _fetchBitbucket(repo)
+          ..sort((a, b) => a.date.compareTo(b.date));
+        if (all.isNotEmpty) {
+          yield all;
+        }
+    }
+  }
+
+  Stream<List<GitCommit>> _streamGitHub(_Repo repo) async* {
+    Uri pageUri(int page) => Uri.https(
+      'api.github.com',
+      '/repos/${repo.owner}/${repo.name}/commits',
+      {'per_page': '$_perPage', 'page': '$page'},
+    );
+
+    final first = await _getResponse(pageUri(1));
+    final newest = (jsonDecode(first.body) as List<dynamic>)
+        .cast<Map<String, dynamic>>()
+        .map(_mapGitHub)
+        .toList();
+    final lastPage = _lastPageFromLink(first.headers['link']);
+
+    var fetched = 0;
+    for (var page = lastPage; page >= 2 && fetched < maxCommits; page--) {
+      final List<dynamic> list;
+      try {
+        list = await _getJsonList(pageUri(page));
+      } on GitRateLimitException {
+        return; // Keep whatever already streamed.
+      }
+      final batch = list.cast<Map<String, dynamic>>().map(_mapGitHub).toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+      fetched += batch.length;
+      yield batch;
+    }
+    yield newest..sort((a, b) => a.date.compareTo(b.date));
+  }
+
+  Stream<List<GitCommit>> _streamGitLab(_Repo repo) async* {
+    final encoded = Uri.encodeComponent(repo.owner);
+    Uri pageUri(int page) => Uri.https(
+      'gitlab.com',
+      '/api/v4/projects/$encoded/repository/commits',
+      {'per_page': '$_perPage', 'page': '$page'},
+    );
+
+    final first = await _getResponse(pageUri(1));
+    final newest = (jsonDecode(first.body) as List<dynamic>)
+        .cast<Map<String, dynamic>>()
+        .map(_mapGitLab)
+        .toList();
+    final totalPages = int.tryParse(first.headers['x-total-pages'] ?? '') ?? 1;
+
+    var fetched = 0;
+    for (var page = totalPages; page >= 2 && fetched < maxCommits; page--) {
+      final List<dynamic> list;
+      try {
+        list = await _getJsonList(pageUri(page));
+      } on GitRateLimitException {
+        return;
+      }
+      final batch = list.cast<Map<String, dynamic>>().map(_mapGitLab).toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+      fetched += batch.length;
+      yield batch;
+    }
+    yield newest..sort((a, b) => a.date.compareTo(b.date));
+  }
+
+  /// Parses the page number of the `rel="last"` entry from a Link header.
+  int _lastPageFromLink(String? link) {
+    if (link == null) {
+      return 1;
+    }
+    final match = RegExp(
+      r'[?&]page=(\d+)[^>]*>;\s*rel="last"',
+    ).firstMatch(link);
+    return match == null ? 1 : int.parse(match.group(1)!);
+  }
+
   _Repo _parse(String rawUrl) {
     var url = rawUrl.trim();
     if (url.isEmpty) {
@@ -113,7 +211,7 @@ class GitService {
     );
   }
 
-  Future<List<dynamic>> _getJsonList(Uri uri) async {
+  Future<http.Response> _getResponse(Uri uri) async {
     final response = await http.get(
       uri,
       headers: {'Accept': 'application/json'},
@@ -127,6 +225,11 @@ class GitService {
     if (response.statusCode != 200) {
       throw GitFetchException('Host returned status ${response.statusCode}.');
     }
+    return response;
+  }
+
+  Future<List<dynamic>> _getJsonList(Uri uri) async {
+    final response = await _getResponse(uri);
     return jsonDecode(response.body) as List<dynamic>;
   }
 

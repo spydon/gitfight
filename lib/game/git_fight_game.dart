@@ -48,7 +48,7 @@ class GitFightGame extends FlameGame {
 
   /// A committer that has not committed within this window drives out of the
   /// scene until they commit again.
-  Duration inactivityLimit = const Duration(days: 90);
+  Duration inactivityLimit = const Duration(days: 365);
 
   final committers = <String, Committer>{};
 

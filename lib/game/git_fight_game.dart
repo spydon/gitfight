@@ -42,7 +42,7 @@ class GitFightGame extends FlameGame {
   /// between concentric rings, [_arcGap] between neighbours along a ring/grid.
   static const _ringGap = 52.0;
   static const _arcGap = 46.0;
-  static const _formationCount = 9;
+  static const _formationCount = 11;
 
   /// Ships use round(scale * 100) as their priority; a ship only slips behind
   /// the planet once it is clearly small (scale below ~0.6). Bullets and
@@ -400,6 +400,24 @@ class GitFightGame extends FlameGame {
         final dir = slot.ring.isEven ? 1 : -1;
         _polarInto(out, slot.radius + jr, slot.angle + ja + t * 0.18 * dir);
         return 0.5 + 0.9 * depth;
+      case 9: // Double helix spinning in 3D.
+        final r = _layoutRadius(n);
+        final radius = r * 0.42;
+        final strand = i % 2;
+        final perStrand = math.max(2, (n / 2).ceil());
+        final u = (i ~/ 2) / (perStrand - 1);
+        final angle = u * 6 * math.pi + t * 1.2 + strand * math.pi;
+        out.setValues(math.cos(angle) * radius + jr, (u - 0.5) * r * 1.7);
+        return 0.5 + 0.6 * (0.5 + 0.5 * math.sin(angle));
+      case 10: // Spinning portal: nested rings tilted in 3D.
+        final slot = _ringSlot(i);
+        final tilt = 0.7 + 0.25 * math.sin(t * 0.25);
+        final angle = slot.angle + ja + t * 0.6;
+        out.setValues(
+          math.cos(angle) * slot.radius + jr,
+          math.sin(angle) * slot.radius * math.sin(tilt),
+        );
+        return 0.45 + 0.85 * (0.5 + 0.5 * math.sin(angle));
       default: // Radar: counter-rotating concentric rings.
         final slot = _ringSlot(i);
         final dir = slot.ring.isEven ? 1 : -1;

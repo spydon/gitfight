@@ -100,9 +100,18 @@ flutter build web --wasm
 
 ## Deployment
 
-Every push to `main` triggers the
-[`Deploy web`](.github/workflows/deploy-web.yml) GitHub Action, which builds the
-WebAssembly bundle and publishes it to the `web` branch.
+Every push to `main` triggers two GitHub Actions:
+
+- [`Deploy web`](.github/workflows/deploy-web.yml) builds the WebAssembly bundle
+  and publishes it to the `web` branch.
+- [`Deploy Supabase functions`](.github/workflows/deploy-supabase.yml) deploys
+  the `fetch-repo` edge function. It needs a `SUPABASE_ACCESS_TOKEN` repository
+  secret (create one at https://supabase.com/dashboard/account/tokens).
+
+Database migrations under `supabase/migrations/` are applied by the Supabase
+GitHub integration. Edge functions are not covered by that integration, which
+is why they are deployed by the action above (or manually with
+`supabase functions deploy fetch-repo --no-verify-jwt`).
 
 ## Project layout
 

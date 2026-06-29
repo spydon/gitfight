@@ -25,11 +25,7 @@ class GitRateLimitException extends GitFetchException {
 /// hosts' CORS enabled JSON APIs instead. The history is returned oldest
 /// commit first so the visualization can replay it forwards in time.
 class GitService {
-  GitService({this.maxCommits = 20000});
-
-  /// Upper bound on how many commits we pull. Only the committer name and date
-  /// are kept per commit, so a large history stays cheap to hold in memory.
-  final int maxCommits;
+  GitService();
 
   static const _perPage = 100;
 
@@ -114,8 +110,7 @@ class GitService {
         .toList();
     final lastPage = _lastPageFromLink(first.headers['link']);
 
-    var fetched = 0;
-    for (var page = lastPage; page >= 2 && fetched < maxCommits; page--) {
+    for (var page = lastPage; page >= 2; page--) {
       final List<dynamic> list;
       try {
         list = await _getJsonList(pageUri(page));
@@ -124,7 +119,6 @@ class GitService {
       }
       final batch = list.cast<Map<String, dynamic>>().map(_mapGitHub).toList()
         ..sort((a, b) => a.date.compareTo(b.date));
-      fetched += batch.length;
       yield batch;
     }
     yield newest..sort((a, b) => a.date.compareTo(b.date));
@@ -145,8 +139,7 @@ class GitService {
         .toList();
     final totalPages = int.tryParse(first.headers['x-total-pages'] ?? '') ?? 1;
 
-    var fetched = 0;
-    for (var page = totalPages; page >= 2 && fetched < maxCommits; page--) {
+    for (var page = totalPages; page >= 2; page--) {
       final List<dynamic> list;
       try {
         list = await _getJsonList(pageUri(page));
@@ -155,7 +148,6 @@ class GitService {
       }
       final batch = list.cast<Map<String, dynamic>>().map(_mapGitLab).toList()
         ..sort((a, b) => a.date.compareTo(b.date));
-      fetched += batch.length;
       yield batch;
     }
     yield newest..sort((a, b) => a.date.compareTo(b.date));
@@ -235,7 +227,7 @@ class GitService {
 
   Future<List<GitCommit>> _fetchGitHub(_Repo repo) async {
     final commits = <GitCommit>[];
-    for (var page = 1; commits.length < maxCommits; page++) {
+    for (var page = 1; ; page++) {
       final uri = Uri.https(
         'api.github.com',
         '/repos/${repo.owner}/${repo.name}/commits',
@@ -264,7 +256,7 @@ class GitService {
   Future<List<GitCommit>> _fetchGitLab(_Repo repo) async {
     final encodedPath = Uri.encodeComponent(repo.owner);
     final commits = <GitCommit>[];
-    for (var page = 1; commits.length < maxCommits; page++) {
+    for (var page = 1; ; page++) {
       final uri = Uri.https(
         'gitlab.com',
         '/api/v4/projects/$encodedPath/repository/commits',
@@ -297,7 +289,7 @@ class GitService {
       '/2.0/repositories/${repo.owner}/${repo.name}/commits',
       {'pagelen': '$_perPage'},
     );
-    while (uri != null && commits.length < maxCommits) {
+    while (uri != null) {
       final Map<String, dynamic> body;
       try {
         body = await _bitbucketBody(uri);

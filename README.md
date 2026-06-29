@@ -57,8 +57,9 @@ cannot clone a repository), so the repository must be public:
 - GitLab (`gitlab.com`, including nested groups)
 - Bitbucket (`bitbucket.org`)
 
-Up to 20,000 commits are fetched per repository (only the committer name, date
-and profile link are kept).
+The full commit history is fetched per repository (only the committer name,
+date and profile link are kept). It streams in oldest first, so the replay
+starts almost immediately instead of waiting for the whole history to load.
 
 ## Caching
 

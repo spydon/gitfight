@@ -15,8 +15,7 @@ import 'package:http/http.dart' as http;
 /// fast, a cache hit is served whole, while a cache miss streams straight from
 /// the host (oldest first) and kicks off a background cache fill for next time.
 class SupabaseGitService extends GitService {
-  SupabaseGitService({super.maxCommits, http.Client? client})
-    : _client = client ?? http.Client();
+  SupabaseGitService({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
 

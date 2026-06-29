@@ -11,7 +11,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const PER_PAGE = 100;
-const MAX_COMMITS = 20000;
 const TTL_MS = 6 * 60 * 60 * 1000; // Re-fetch a repository at most every 6h.
 
 const corsHeaders = {
@@ -108,7 +107,7 @@ function githubHeaders(): Record<string, string> {
 
 async function fetchGitHub(repo: Repo): Promise<Commit[]> {
   const commits: Commit[] = [];
-  for (let page = 1; commits.length < MAX_COMMITS; page++) {
+  for (let page = 1; ; page++) {
     const url =
       `https://api.github.com/repos/${repo.owner}/${repo.name}/commits` +
       `?per_page=${PER_PAGE}&page=${page}`;
@@ -140,7 +139,7 @@ async function fetchGitHub(repo: Repo): Promise<Commit[]> {
 async function fetchGitLab(repo: Repo): Promise<Commit[]> {
   const encoded = encodeURIComponent(repo.owner);
   const commits: Commit[] = [];
-  for (let page = 1; commits.length < MAX_COMMITS; page++) {
+  for (let page = 1; ; page++) {
     const url =
       `https://gitlab.com/api/v4/projects/${encoded}/repository/commits` +
       `?per_page=${PER_PAGE}&page=${page}`;
@@ -171,7 +170,7 @@ async function fetchBitbucket(repo: Repo): Promise<Commit[]> {
   const commits: Commit[] = [];
   let url: string | null =
     `https://api.bitbucket.org/2.0/repositories/${repo.owner}/${repo.name}/commits?pagelen=${PER_PAGE}`;
-  while (url && commits.length < MAX_COMMITS) {
+  while (url) {
     let body: any;
     try {
       body = await getJson(url);

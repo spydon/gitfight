@@ -1,12 +1,12 @@
 {
-    "name": "gitfight",
-    "short_name": "gitfight",
+    "name": "Git Fight",
+    "short_name": "Git Fight",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#05060D",
+    "theme_color": "#05060D",
+    "description": "Replay any public git repository as a top-down space battle.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

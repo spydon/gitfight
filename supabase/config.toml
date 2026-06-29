@@ -1,0 +1,7 @@
+project_id = "obxavvuwjepnjoykpfce"
+
+# The client calls this function with the publishable key, which is not a JWT,
+# so JWT verification must be disabled. The function is safe to call publicly:
+# it only ever reads from / refreshes the shared repository cache.
+[functions.fetch-repo]
+verify_jwt = false

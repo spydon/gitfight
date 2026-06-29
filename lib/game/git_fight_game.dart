@@ -42,7 +42,7 @@ class GitFightGame extends FlameGame {
   /// between concentric rings, [_arcGap] between neighbours along a ring/grid.
   static const _ringGap = 52.0;
   static const _arcGap = 46.0;
-  static const _formationCount = 7;
+  static const _formationCount = 9;
 
   final GitService _service;
   final StatsService _stats;
@@ -309,18 +309,20 @@ class GitFightGame extends FlameGame {
       if (ship == null || ship.isLeaving) {
         continue;
       }
-      ship.setFormationTarget(
-        _formationPosition(committer.slotIndex, n, _formationTime),
-      );
+      final slot = _formationSlot(committer.slotIndex, n, _formationTime);
+      ship.setFormationTarget(slot.pos);
+      ship.setDepth(slot.scale);
     }
   }
 
-  /// Position of slot [i] of [n] ships in the current formation at time [t].
+  /// Position (and depth scale) of slot [i] of [n] ships in the current
+  /// formation at time [t].
   ///
   /// Formations are kept symmetric and evenly spaced (no overlaps), with a
   /// small deterministic per-ship jitter so they never look perfectly
-  /// mechanical.
-  Vector2 _formationPosition(int i, int n, double t) {
+  /// mechanical. Some formations also move in Z, returning a scale below 1 for
+  /// ships that are "further away".
+  ({Vector2 pos, double scale}) _formationSlot(int i, int n, double t) {
     final jr = _jitter(i, 6);
     final ja = _jitter(i * 31 + 7, 0.05);
 
@@ -329,16 +331,15 @@ class GitFightGame extends FlameGame {
         final slot = _ringSlot(i);
         final radius =
             (slot.radius + jr) * (1 + 0.05 * math.sin(t * 1.4 + slot.ring));
-        final angle = slot.angle + ja + t * 0.22;
-        return _polar(radius, angle);
+        return (pos: _polar(radius, slot.angle + ja + t * 0.22), scale: 1);
       case 2: // Swirl: each ring twisted and rotating for a galaxy sweep.
         final slot = _ringSlot(i);
         final angle = slot.angle + ja + t * 0.3 + slot.ring * 0.18;
-        return _polar(slot.radius + jr, angle);
+        return (pos: _polar(slot.radius + jr, angle), scale: 1);
       case 3: // Sunflower spiral (organic, evenly spread).
         final radius = _innerRadius + 24 * math.sqrt(i.toDouble()) + jr;
         final angle = i * _goldenAngle + ja + t * 0.25;
-        return _polar(radius, angle);
+        return (pos: _polar(radius, angle), scale: 1);
       case 4: // Slowly rotating square grid.
         final cols = math.max(1, math.sqrt(n).ceil());
         final rows = (n / cols).ceil();
@@ -346,24 +347,45 @@ class GitFightGame extends FlameGame {
         final gy = ((i ~/ cols) - (rows - 1) / 2) * _arcGap + jr;
         final ca = math.cos(t * 0.18);
         final sa = math.sin(t * 0.18);
-        return Vector2(gx * ca - gy * sa, gx * sa + gy * ca);
+        return (pos: Vector2(gx * ca - gy * sa, gx * sa + gy * ca), scale: 1);
       case 5: // Flower: ring radius bends into rotating petals.
         final slot = _ringSlot(i);
         final radius =
             slot.radius + jr + 18 * math.sin(6 * slot.angle + t * 0.6);
-        final angle = slot.angle + ja + t * 0.15;
-        return _polar(radius, angle);
+        return (pos: _polar(radius, slot.angle + ja + t * 0.15), scale: 1);
       case 6: // Ripple: rings pulse outward like rings on water.
         final slot = _ringSlot(i);
         final radius =
             slot.radius + jr + 14 * math.sin(slot.ring * 0.9 - t * 2);
         final angle = slot.angle + ja + t * 0.12 * (slot.ring.isEven ? 1 : -1);
-        return _polar(radius, angle);
+        return (pos: _polar(radius, angle), scale: 1);
+      case 7: // Rotating sphere: front ships big, back ships small (Z depth).
+        final r = _layoutRadius(n);
+        final k = i + 0.5;
+        final phi = math.acos(1 - 2 * k / n);
+        final theta = math.pi * (1 + math.sqrt(5)) * k;
+        final sinPhi = math.sin(phi);
+        final x = sinPhi * math.cos(theta);
+        final y = sinPhi * math.sin(theta);
+        final z = math.cos(phi);
+        final a = t * 0.5;
+        final rx = x * math.cos(a) + z * math.sin(a);
+        final rz = -x * math.sin(a) + z * math.cos(a);
+        return (
+          pos: Vector2(rx * r * 0.72, y * r * 0.72),
+          scale: 0.45 + 0.9 * (rz + 1) / 2,
+        );
+      case 8: // Depth pulse: rings surge toward and away from the viewer.
+        final slot = _ringSlot(i);
+        final depth = 0.5 + 0.5 * math.sin(t * 1.1 + slot.ring * 0.8);
+        final dir = slot.ring.isEven ? 1 : -1;
+        final angle = slot.angle + ja + t * 0.18 * dir;
+        return (pos: _polar(slot.radius + jr, angle), scale: 0.5 + 0.9 * depth);
       default: // Radar: counter-rotating concentric rings.
         final slot = _ringSlot(i);
         final dir = slot.ring.isEven ? 1 : -1;
         final angle = slot.angle + ja + t * 0.3 * dir;
-        return _polar(slot.radius + jr, angle);
+        return (pos: _polar(slot.radius + jr, angle), scale: 1);
     }
   }
 
@@ -501,11 +523,11 @@ class GitFightGame extends FlameGame {
   }
 
   Spaceship _spawnShip(Committer committer) {
-    final spawn = _formationPosition(
+    final spawn = _formationSlot(
       committer.slotIndex,
       math.max(1, _spawnCount),
       _formationTime,
-    );
+    ).pos;
     final ship = Spaceship(
       color: committer.color,
       shipName: committer.displayName,

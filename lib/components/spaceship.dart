@@ -1,14 +1,12 @@
 import 'dart:math' as math;
 
 import 'package:flame/components.dart';
-import 'package:flame/effects.dart';
 import 'package:flutter/widgets.dart';
 
 /// A committer's ship. When idle it flies to the formation slot the game hands
-/// it, so the whole fleet moves together in shifting patterns. While firing it
-/// nearly stops to take aim, and it drives out of the scene when the committer
-/// goes quiet. Its nickname and score are drawn with a contrasting outline so
-/// they stay readable over any colour.
+/// it (including a depth/scale so formations can move in Z), nearly stops while
+/// firing to take aim, and drives out of the scene when the committer goes
+/// quiet. Its nickname and score are drawn with a contrasting outline.
 class Spaceship extends PositionComponent {
   Spaceship({
     required this.color,
@@ -18,7 +16,7 @@ class Spaceship extends PositionComponent {
   }) : super(
          anchor: Anchor.center,
          position: spawn.clone(),
-         size: Vector2(34, 34),
+         size: Vector2(36, 36),
        );
 
   final Color color;
@@ -33,11 +31,14 @@ class Spaceship extends PositionComponent {
 
   late final TextComponent _outline;
   late final TextComponent _label;
+  late final Color _wingColor;
+  late final Color _trimColor;
   int _score = 0;
 
   double _heading = -math.pi / 2;
   double _targetHeading = -math.pi / 2;
   double _fireFlash = 0;
+  double _depthScale = 1;
 
   Vector2 _velocity = Vector2.zero();
   Vector2 _formationTarget = Vector2.zero();
@@ -54,6 +55,8 @@ class Spaceship extends PositionComponent {
   Future<void> onLoad() async {
     _score = initialScore;
     _formationTarget = position.clone();
+    _wingColor = Color.lerp(color, const Color(0xFF05060D), 0.4)!;
+    _trimColor = Color.lerp(color, const Color(0xFFFFFFFF), 0.55)!;
 
     final contrast = color.computeLuminance() > 0.5
         ? const Color(0xFF06080F)
@@ -90,14 +93,8 @@ class Spaceship extends PositionComponent {
     add(_outline);
     add(_label);
 
-    // Fly-in: pop into existence with a quick scale up.
+    // Fly-in: ease up from nothing to the current depth scale.
     scale = Vector2.zero();
-    add(
-      ScaleEffect.to(
-        Vector2.all(1),
-        EffectController(duration: 0.4, curve: Curves.easeOutBack),
-      ),
-    );
   }
 
   String get _labelText => '$shipName  $_score';
@@ -112,6 +109,14 @@ class Spaceship extends PositionComponent {
   void setFormationTarget(Vector2 target) {
     if (!_leaving) {
       _formationTarget = target;
+    }
+  }
+
+  /// Depth of this ship in the formation, expressed as a render scale (smaller
+  /// is "further away"). Ignored while leaving.
+  void setDepth(double depthScale) {
+    if (!_leaving) {
+      _depthScale = depthScale;
     }
   }
 
@@ -131,6 +136,7 @@ class Spaceship extends PositionComponent {
     _leaving = true;
     _onExited = onExited;
     _exitBeyond = beyond;
+    _depthScale = 1;
     final base = position.length2 == 0 ? Vector2(1, 0) : position;
     _exitTarget = base.normalized() * (beyond + 400);
   }
@@ -153,22 +159,23 @@ class Spaceship extends PositionComponent {
 
     if (_leaving) {
       _updateLeaving(dt);
-      return;
+    } else {
+      final toTarget = _formationTarget - position;
+      var desired = toTarget * _trackGain;
+      final speed = desired.length;
+      if (speed > _maxSpeed) {
+        desired *= _maxSpeed / speed;
+      }
+      if (_fireFlash > 0) {
+        desired *= _firingSpeedScale; // Nearly stop while taking a shot.
+      }
+      _velocity += (desired - _velocity) * math.min(1, dt * _steerLerp);
+      position += _velocity * dt;
+      _updateHeading(dt);
     }
 
-    final toTarget = _formationTarget - position;
-    var desired = toTarget * _trackGain;
-    final speed = desired.length;
-    if (speed > _maxSpeed) {
-      desired *= _maxSpeed / speed;
-    }
-    // Nearly stop while taking a shot.
-    if (_fireFlash > 0) {
-      desired *= _firingSpeedScale;
-    }
-    _velocity += (desired - _velocity) * math.min(1, dt * _steerLerp);
-    position += _velocity * dt;
-    _updateHeading(dt);
+    final s = scale.x + (_depthScale - scale.x) * math.min(1, dt * 4);
+    scale.setValues(s, s);
   }
 
   void _updateLeaving(double dt) {
@@ -208,46 +215,92 @@ class Spaceship extends PositionComponent {
 
   @override
   void render(Canvas canvas) {
+    final w = size.x;
+    final h = size.y;
     canvas.save();
-    canvas.translate(size.x / 2, size.y / 2);
+    canvas.translate(w / 2, h / 2);
     canvas.rotate(_heading + math.pi / 2);
 
-    final hull = Path()
-      ..moveTo(0, -size.y / 2)
-      ..lineTo(size.x / 2, size.y / 2)
-      ..lineTo(0, size.y / 3)
-      ..lineTo(-size.x / 2, size.y / 2)
-      ..close();
-
-    canvas.drawPath(
-      hull,
-      Paint()
-        ..color = color.withValues(alpha: 0.25)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
-    );
-    canvas.drawPath(hull, Paint()..color = color);
-    canvas.drawPath(
-      hull,
-      Paint()
-        ..color = const Color(0xFFFFFFFF).withValues(alpha: 0.6)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
-    );
-
-    // Cockpit.
+    // Soft aura around the ship.
     canvas.drawCircle(
-      const Offset(0, -2),
-      4,
+      Offset.zero,
+      w * 0.66,
+      Paint()
+        ..color = color.withValues(alpha: 0.16)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+    );
+
+    // Engine glow at the tail, flaring up while firing.
+    canvas.drawCircle(
+      Offset(0, h * 0.42),
+      h * (0.26 + 0.5 * _fireFlash),
+      Paint()
+        ..color = const Color(
+          0xFF8FE3FF,
+        ).withValues(alpha: 0.5 + 0.4 * _fireFlash)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+    );
+
+    // Swept-back wings.
+    final wings = Path()
+      ..moveTo(w * 0.16, h * 0.04)
+      ..lineTo(w * 0.54, h * 0.46)
+      ..lineTo(w * 0.12, h * 0.34)
+      ..close()
+      ..moveTo(-w * 0.16, h * 0.04)
+      ..lineTo(-w * 0.54, h * 0.46)
+      ..lineTo(-w * 0.12, h * 0.34)
+      ..close();
+    canvas.drawPath(wings, Paint()..color = _wingColor);
+
+    // Sleek dart hull.
+    final hull = Path()
+      ..moveTo(0, -h * 0.55)
+      ..lineTo(w * 0.2, h * 0.12)
+      ..lineTo(w * 0.15, h * 0.48)
+      ..lineTo(-w * 0.15, h * 0.48)
+      ..lineTo(-w * 0.2, h * 0.12)
+      ..close();
+    canvas.drawPath(hull, Paint()..color = color);
+
+    // Bright leading edge highlight.
+    canvas.drawPath(
+      Path()
+        ..moveTo(0, -h * 0.55)
+        ..lineTo(w * 0.2, h * 0.12)
+        ..lineTo(0, h * 0.02)
+        ..close(),
+      Paint()..color = _trimColor,
+    );
+
+    // Crisp outline.
+    canvas.drawPath(
+      hull,
+      Paint()
+        ..color = const Color(0xFFFFFFFF).withValues(alpha: 0.7)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.4,
+    );
+
+    // Glowing canopy.
+    canvas.drawCircle(
+      Offset(0, -h * 0.12),
+      w * 0.1,
       Paint()..color = const Color(0xFFEAF6FF),
+    );
+    canvas.drawCircle(
+      Offset(0, -h * 0.12),
+      w * 0.055,
+      Paint()..color = const Color(0xFF8FE3FF),
     );
 
     // Thruster flame when firing.
     if (_fireFlash > 0) {
       canvas.drawPath(
         Path()
-          ..moveTo(-4, size.y / 2)
-          ..lineTo(0, size.y / 2 + 10 * _fireFlash)
-          ..lineTo(4, size.y / 2),
+          ..moveTo(-w * 0.12, h * 0.48)
+          ..lineTo(0, h * 0.48 + h * 0.4 * _fireFlash)
+          ..lineTo(w * 0.12, h * 0.48),
         Paint()..color = const Color(0xFFFFD166).withValues(alpha: _fireFlash),
       );
     }

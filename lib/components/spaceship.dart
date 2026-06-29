@@ -34,6 +34,9 @@ class Spaceship extends PositionComponent {
   static const _engineColor = Color(0xFF8FE3FF);
   static const _flameColor = Color(0xFFFFD166);
 
+  /// Muted highlight tone used instead of pure white, so ships are not glaring.
+  static const _highlight = Color(0xFFAEC2D6);
+
   /// Distance from the centre within which the ship keeps its current depth
   /// priority (just clears the planet, which is at the origin).
   static const _planetClearance = 80.0;
@@ -68,8 +71,8 @@ class Spaceship extends PositionComponent {
   final Paint _outlinePaint = Paint()
     ..style = PaintingStyle.stroke
     ..strokeWidth = 1.4
-    ..color = const Color(0xB3FFFFFF);
-  final Paint _canopyOuterPaint = Paint()..color = const Color(0xFFEAF6FF);
+    ..color = _highlight.withValues(alpha: 0.4);
+  final Paint _canopyOuterPaint = Paint()..color = _highlight;
   final Paint _canopyInnerPaint = Paint()..color = _engineColor;
   final Paint _flamePaint = Paint()
     ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
@@ -88,7 +91,7 @@ class Spaceship extends PositionComponent {
     _enginePaint.color = _engineColor.withValues(alpha: 0.45);
     _wingPaint.color = Color.lerp(color, const Color(0xFF05060D), 0.4)!;
     _hullPaint.color = color;
-    _trimPaint.color = Color.lerp(color, const Color(0xFFFFFFFF), 0.55)!;
+    _trimPaint.color = Color.lerp(color, _highlight, 0.4)!;
     _buildPaths();
 
     final contrast = color.computeLuminance() > 0.5

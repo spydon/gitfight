@@ -32,6 +32,11 @@ class _FakeStatsService extends StatsService {
 
 void main() {
   testWidgets('entry modal closes after pressing Launch', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     await tester.pumpWidget(
       MaterialApp(
         home: GameScreen(

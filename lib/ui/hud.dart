@@ -164,21 +164,16 @@ class Hud extends StatelessWidget {
     ),
   );
 
-  Widget _replayControls() => Wrap(
-    crossAxisAlignment: WrapCrossAlignment.center,
-    spacing: 14,
-    runSpacing: 8,
+  Widget _replayControls() => Row(
     children: [
-      const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.play_arrow, size: 18, color: Color(0xFF9FB3C8)),
-          SizedBox(width: 6),
-          Text('Replaying history', style: TextStyle(color: Color(0xFF9FB3C8))),
-        ],
+      const Icon(Icons.play_arrow, size: 18, color: Color(0xFF9FB3C8)),
+      const SizedBox(width: 6),
+      const Text(
+        'Replaying history',
+        style: TextStyle(color: Color(0xFF9FB3C8)),
       ),
-      SizedBox(
-        width: 160,
+      const SizedBox(width: 16),
+      Expanded(
         child: ValueListenableBuilder<double>(
           valueListenable: game.progress,
           builder: (_, value, _) => ClipRRect(
@@ -187,19 +182,17 @@ class Hud extends StatelessWidget {
           ),
         ),
       ),
-      Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('Speed', style: TextStyle(color: Color(0xFF9FB3C8))),
-          const SizedBox(width: 8),
-          for (final s in const [0.5, 1.0, 2.0, 4.0, 10.0]) _speedButton(s),
-        ],
-      ),
+      const SizedBox(width: 16),
+      const Text('Speed', style: TextStyle(color: Color(0xFF9FB3C8))),
+      const SizedBox(width: 8),
+      for (final s in const [0.5, 1.0, 2.0, 4.0, 10.0]) _speedButton(s),
+      const SizedBox(width: 12),
       OutlinedButton.icon(
         onPressed: onGoLive,
         icon: const Icon(Icons.sensors, size: 18),
         label: const Text('Go live'),
       ),
+      const SizedBox(width: 8),
       IconButton(
         tooltip: 'New repository',
         onPressed: onRestart,

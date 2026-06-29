@@ -4,36 +4,32 @@ import 'package:flame/components.dart';
 import 'package:flame/effects.dart';
 import 'package:flutter/widgets.dart';
 
-/// A committer's ship. When idle it meanders naturally around its home slot, it
-/// turns to face whatever it is firing at, and it can drive out of the scene
-/// when the committer goes quiet. Its nickname and score are drawn with a
-/// contrasting outline so they stay readable over any colour.
+/// A committer's ship. When idle it flies to the formation slot the game hands
+/// it, so the whole fleet moves together in shifting patterns. While firing it
+/// nearly stops to take aim, and it drives out of the scene when the committer
+/// goes quiet. Its nickname and score are drawn with a contrasting outline so
+/// they stay readable over any colour.
 class Spaceship extends PositionComponent {
   Spaceship({
     required this.color,
     required this.shipName,
-    required this.home,
+    required Vector2 spawn,
     this.initialScore = 0,
   }) : super(
          anchor: Anchor.center,
-         position: home.clone(),
+         position: spawn.clone(),
          size: Vector2(34, 34),
        );
 
   final Color color;
   final String shipName;
-  final Vector2 home;
   final int initialScore;
 
-  // Steering parameters for the idle meander.
-  static const _cruiseSpeed = 26.0;
-  static const _maxSpeed = 46.0;
-  static const _turnJitter = 2.6;
-  static const _homePull = 0.7;
-  static const _steer = 1.8;
-
-  static const _exitSpeed = 230.0;
-  static const _exitMargin = 560.0;
+  static const _maxSpeed = 150.0;
+  static const _trackGain = 2.6;
+  static const _steerLerp = 6.0;
+  static const _firingSpeedScale = 0.06;
+  static const _exitSpeed = 240.0;
 
   late final TextComponent _outline;
   late final TextComponent _label;
@@ -43,23 +39,21 @@ class Spaceship extends PositionComponent {
   double _targetHeading = -math.pi / 2;
   double _fireFlash = 0;
 
-  final _rng = math.Random();
   Vector2 _velocity = Vector2.zero();
-  double _wanderAngle = 0;
+  Vector2 _formationTarget = Vector2.zero();
   Vector2 _aimTarget = Vector2.zero();
 
   bool _leaving = false;
   VoidCallback? _onExited;
   Vector2 _exitTarget = Vector2.zero();
+  double _exitBeyond = 0;
 
   bool get isLeaving => _leaving;
 
   @override
   Future<void> onLoad() async {
     _score = initialScore;
-    _wanderAngle = _rng.nextDouble() * 2 * math.pi;
-    _velocity =
-        Vector2(math.cos(_wanderAngle), math.sin(_wanderAngle)) * _cruiseSpeed;
+    _formationTarget = position.clone();
 
     final contrast = color.computeLuminance() > 0.5
         ? const Color(0xFF06080F)
@@ -114,24 +108,34 @@ class Spaceship extends PositionComponent {
     _outline.text = _labelText;
   }
 
-  /// Turn to face [worldTarget] and flash the thrusters.
+  /// The fleet's formation slot this ship should fly to. Ignored while leaving.
+  void setFormationTarget(Vector2 target) {
+    if (!_leaving) {
+      _formationTarget = target;
+    }
+  }
+
+  /// Turn to face [worldTarget] and flash the thrusters. Firing also makes the
+  /// ship nearly stop so it looks like it is taking aim.
   void aimAt(Vector2 worldTarget) {
     _aimTarget = worldTarget.clone();
     _fireFlash = 1;
   }
 
-  /// Drive off the screen. [onExited] runs once the ship has left.
-  void leave(VoidCallback onExited) {
+  /// Drive off the screen, past [beyond] from the centre. [onExited] runs once
+  /// the ship has left.
+  void leave(VoidCallback onExited, double beyond) {
     if (_leaving) {
       return;
     }
     _leaving = true;
     _onExited = onExited;
-    final base = position.length2 == 0 ? home : position;
-    _exitTarget = base.normalized() * (home.length + _exitMargin + 200);
+    _exitBeyond = beyond;
+    final base = position.length2 == 0 ? Vector2(1, 0) : position;
+    _exitTarget = base.normalized() * (beyond + 400);
   }
 
-  /// Come back and resume meandering around the home slot.
+  /// Rejoin the fleet and resume flying to formation slots.
   void returnHome() {
     if (!_leaving) {
       return;
@@ -151,25 +155,20 @@ class Spaceship extends PositionComponent {
       _updateLeaving(dt);
       return;
     }
-    _updateWander(dt);
-    _updateHeading(dt);
-  }
 
-  void _updateWander(double dt) {
-    // Reynolds-style wander: a heading that random-walks gives smooth, curving
-    // paths, while a spring back towards home keeps the ship in its area.
-    _wanderAngle += (_rng.nextDouble() * 2 - 1) * _turnJitter * dt;
-    final cruise =
-        Vector2(math.cos(_wanderAngle), math.sin(_wanderAngle)) * _cruiseSpeed;
-    final pull = (home - position) * _homePull;
-    final desired = cruise + pull;
-
-    _velocity += (desired - _velocity) * math.min(1, _steer * dt);
-    final speed = _velocity.length;
+    final toTarget = _formationTarget - position;
+    var desired = toTarget * _trackGain;
+    final speed = desired.length;
     if (speed > _maxSpeed) {
-      _velocity *= _maxSpeed / speed;
+      desired *= _maxSpeed / speed;
     }
+    // Nearly stop while taking a shot.
+    if (_fireFlash > 0) {
+      desired *= _firingSpeedScale;
+    }
+    _velocity += (desired - _velocity) * math.min(1, dt * _steerLerp);
     position += _velocity * dt;
+    _updateHeading(dt);
   }
 
   void _updateLeaving(double dt) {
@@ -177,9 +176,9 @@ class Spaceship extends PositionComponent {
     final dist = toTarget.length;
     if (dist > 0.5) {
       _velocity = toTarget / dist * _exitSpeed;
-      position += _velocity * math.min(dt, dist / _exitSpeed);
+      position += _velocity * dt;
     }
-    if (position.length > home.length + _exitMargin) {
+    if (position.length > _exitBeyond + 150) {
       _onExited?.call();
       removeFromParent();
       return;
@@ -193,7 +192,7 @@ class Spaceship extends PositionComponent {
       if (d.length2 > 0) {
         _targetHeading = math.atan2(d.y, d.x);
       }
-    } else if (_velocity.length2 > 0) {
+    } else if (_velocity.length2 > 1) {
       _targetHeading = math.atan2(_velocity.y, _velocity.x);
     }
 

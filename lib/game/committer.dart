@@ -1,6 +1,5 @@
 import 'dart:ui';
 
-import 'package:flame/components.dart';
 import 'package:gitfight/components/spaceship.dart';
 
 /// Runtime state for one committer taking part in the fight.
@@ -13,20 +12,18 @@ class Committer {
     required this.displayName,
     required this.color,
     required this.slotIndex,
-    required this.home,
     this.profileUrl,
   });
 
   final String identityKey;
   final String displayName;
   final Color color;
+
+  /// Stable index used to place this committer in the fleet's formations.
   final int slotIndex;
 
   /// Link to the committer's profile on the host, when available.
   final String? profileUrl;
-
-  /// The slot this committer's ship hovers around when present.
-  final Vector2 home;
 
   /// Null while the committer has driven out of the scene.
   Spaceship? ship;

@@ -35,6 +35,10 @@ class GitFightGame extends FlameGame {
   /// How long a single commit takes to play back, before [speed] is applied.
   static const _baseInterval = 0.275;
 
+  /// Keeps the fleet clear of the planet in radial formations.
+  static const _innerRadius = 100.0;
+  static const _formationCount = 6;
+
   final GitService _service;
   final StatsService _stats;
 
@@ -53,6 +57,12 @@ class GitFightGame extends FlameGame {
   int _index = 0;
   double _sinceLast = 0;
   int _spawnCount = 0;
+
+  final _rng = math.Random();
+  double _formationTime = 0;
+  double _formationSwitch = 0;
+  int _formationType = 0;
+  double _viewExtent = 320;
 
   double speed = 1.0;
   bool _playing = false;
@@ -222,6 +232,7 @@ class GitFightGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
+    _updateFormation(dt);
     if (!_playing || _timeline.isEmpty) {
       return;
     }
@@ -245,6 +256,75 @@ class GitFightGame extends FlameGame {
       _playing = false;
       finished.value = true;
       goLive();
+    }
+  }
+
+  /// Advances the shared formation clock, occasionally switches to a different
+  /// pattern, and hands every present ship its current slot in the formation.
+  void _updateFormation(double dt) {
+    _formationTime += dt;
+    _formationSwitch -= dt;
+    if (_formationSwitch <= 0) {
+      final next = _rng.nextInt(_formationCount - 1);
+      _formationType = next >= _formationType ? next + 1 : next;
+      _formationSwitch = 9 + _rng.nextDouble() * 5;
+    }
+    final n = math.max(1, _spawnCount);
+    for (final committer in committers.values) {
+      final ship = committer.ship;
+      if (ship == null || ship.isLeaving) {
+        continue;
+      }
+      ship.setFormationTarget(
+        _formationPosition(committer.slotIndex, n, _formationTime),
+      );
+    }
+  }
+
+  /// Position of slot [i] of [n] ships in the current formation at time [t].
+  Vector2 _formationPosition(int i, int n, double t) {
+    final r = 130 + math.sqrt(n) * 24;
+    switch (_formationType) {
+      case 1: // Rotating galaxy spiral.
+        final angle = i * _goldenAngle + t * 0.3;
+        final radius =
+            _innerRadius + (r - _innerRadius) * math.sqrt((i + 0.5) / n);
+        return Vector2(math.cos(angle) * radius, math.sin(angle) * radius);
+      case 2: // Breathing, counter-rotating concentric rings.
+        final rings = math.max(1, math.sqrt(n).round());
+        final ring = i % rings;
+        final perRing = (n / rings).ceil();
+        final idx = i ~/ rings;
+        final radius =
+            (_innerRadius + (r - _innerRadius) * (ring + 1) / rings) *
+            (1 + 0.16 * math.sin(t * 1.6 + ring * 0.9));
+        final dir = ring.isEven ? 1 : -1;
+        final angle = 2 * math.pi * idx / math.max(1, perRing) + t * 0.5 * dir;
+        return Vector2(math.cos(angle) * radius, math.sin(angle) * radius);
+      case 3: // Lissajous swarm sweeping across the centre.
+        final phase = 2 * math.pi * i / n;
+        return Vector2(
+          r * math.sin(t * 0.6 + phase * 3),
+          r * 0.72 * math.sin(t * 0.8 + phase * 2),
+        );
+      case 4: // Slowly rotating grid.
+        final cols = math.max(1, math.sqrt(n).ceil());
+        final rows = (n / cols).ceil();
+        final spacing = 2 * r / math.max(1, math.max(cols, rows));
+        final gx = ((i % cols) - (cols - 1) / 2) * spacing;
+        final gy = ((i ~/ cols) - (rows - 1) / 2) * spacing;
+        final ca = math.cos(t * 0.2);
+        final sa = math.sin(t * 0.2);
+        return Vector2(gx * ca - gy * sa, gx * sa + gy * ca);
+      case 5: // Rotating travelling wave.
+        final x = n <= 1 ? 0.0 : (i / (n - 1) - 0.5) * 2 * r;
+        final y = r * 0.45 * math.sin(x * 0.025 + t * 1.6);
+        final ca = math.cos(t * 0.12);
+        final sa = math.sin(t * 0.12);
+        return Vector2(x * ca - y * sa, x * sa + y * ca);
+      default: // Orbiting ring.
+        final angle = 2 * math.pi * i / n + t * 0.35;
+        return Vector2(math.cos(angle) * r, math.sin(angle) * r);
     }
   }
 
@@ -327,7 +407,6 @@ class GitFightGame extends FlameGame {
       displayName: commit.displayName,
       color: _colorFor(commit.identityKey),
       slotIndex: slotIndex,
-      home: _slotPosition(slotIndex),
       profileUrl: commit.profileUrl,
     );
     committer.lastCommitDate = commit.date;
@@ -338,10 +417,15 @@ class GitFightGame extends FlameGame {
   }
 
   Spaceship _spawnShip(Committer committer) {
+    final spawn = _formationPosition(
+      committer.slotIndex,
+      math.max(1, _spawnCount),
+      _formationTime,
+    );
     final ship = Spaceship(
       color: committer.color,
       shipName: committer.displayName,
-      home: committer.home,
+      spawn: spawn,
       initialScore: committer.score,
     );
     world.add(ship);
@@ -358,7 +442,7 @@ class GitFightGame extends FlameGame {
         continue;
       }
       if (now.difference(last) > inactivityLimit) {
-        ship.leave(() => committer.ship = null);
+        ship.leave(() => committer.ship = null, _viewExtent);
       }
     }
   }
@@ -386,28 +470,19 @@ class GitFightGame extends FlameGame {
     leaderboard.value = all.take(8).toList();
   }
 
-  Vector2 _slotPosition(int index) {
-    final angle = index * _goldenAngle;
-    final radius = 150 + math.sqrt(index) * 30;
-    return Vector2(math.cos(angle) * radius, math.sin(angle) * radius);
-  }
-
   Vector2 _surfacePoint(Vector2 from) {
     final dir = (_planet.position - from)..normalize();
     return _planet.position - dir * _planetRadius;
   }
 
   void _fitCamera() {
-    var maxRadius = 220.0;
-    for (final committer in committers.values) {
-      maxRadius = math.max(maxRadius, committer.home.length);
-    }
-    final margin = maxRadius + 130;
+    final r = 130 + math.sqrt(math.max(1, _spawnCount)) * 24;
+    _viewExtent = r * 1.5 + 70;
     final shortest = math.min(size.x, size.y);
     if (shortest <= 0) {
       return;
     }
-    camera.viewfinder.zoom = (shortest / 2) / margin;
+    camera.viewfinder.zoom = (shortest / 2) / _viewExtent;
   }
 
   @override

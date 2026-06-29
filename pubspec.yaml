@@ -33,6 +33,7 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.6.0
+  supabase_flutter: ^2.15.1
   url_launcher: ^6.3.2
 dev_dependencies:
   flame_lint: ^1.4.3

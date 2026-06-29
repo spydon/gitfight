@@ -44,9 +44,10 @@ class GitFightGame extends FlameGame {
   static const _arcGap = 46.0;
   static const _formationCount = 9;
 
-  /// The planet sits at the scale-1 depth (ships use scale * 100 as priority).
-  /// Bullets and explosions always draw on top.
-  static const _planetPriority = 100;
+  /// Ships use round(scale * 100) as their priority; a ship only slips behind
+  /// the planet once it is clearly small (scale below ~0.6). Bullets and
+  /// explosions always draw on top.
+  static const _planetPriority = 60;
   static const _effectPriority = 1 << 20;
 
   final GitService _service;

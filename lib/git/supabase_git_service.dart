@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:gitfight/git/git_commit.dart';
 import 'package:gitfight/git/git_service.dart';
-import 'package:gitfight/supabase_config.dart';
-import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Reads commit history through the `fetch-repo` Supabase edge function, which
 /// caches each repository so the next visitor asking for the same repository
@@ -15,9 +13,10 @@ import 'package:http/http.dart' as http;
 /// fast, a cache hit is served whole, while a cache miss streams straight from
 /// the host (oldest first) and kicks off a background cache fill for next time.
 class SupabaseGitService extends GitService {
-  SupabaseGitService({http.Client? client}) : _client = client ?? http.Client();
+  SupabaseGitService({SupabaseClient? client}) : _override = client;
 
-  final http.Client _client;
+  final SupabaseClient? _override;
+  SupabaseClient get _client => _override ?? Supabase.instance.client;
 
   @override
   Stream<List<GitCommit>> streamHistory(String rawUrl) async* {
@@ -61,24 +60,21 @@ class SupabaseGitService extends GitService {
   }
 
   Future<Map<String, dynamic>> _invoke(Map<String, dynamic> body) async {
-    final response = await _client.post(
-      SupabaseConfig.functionUrl('fetch-repo'),
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SupabaseConfig.publishableKey,
-        'Authorization': 'Bearer ${SupabaseConfig.publishableKey}',
-      },
-      body: jsonEncode(body),
-    );
-    final data = jsonDecode(response.body);
-    if (response.statusCode == 200 && data is Map<String, dynamic>) {
-      return data;
+    try {
+      final response = await _client.functions.invoke('fetch-repo', body: body);
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return data;
+      }
+      throw Exception('Unexpected response from the cache.');
+    } on FunctionException catch (e) {
+      final details = e.details;
+      final message = details is Map ? details['error'] : null;
+      if (message != null) {
+        throw GitFetchException(message.toString());
+      }
+      throw Exception('Cache request failed (${e.status}).');
     }
-    final message = data is Map ? data['error'] : null;
-    if (message != null) {
-      throw GitFetchException(message.toString());
-    }
-    throw Exception('Cache request failed (${response.statusCode}).');
   }
 
   List<GitCommit> _parseCommits(Map<String, dynamic> data) {

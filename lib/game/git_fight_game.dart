@@ -44,6 +44,11 @@ class GitFightGame extends FlameGame {
   static const _arcGap = 46.0;
   static const _formationCount = 9;
 
+  /// The planet sits at the scale-1 depth (ships use scale * 100 as priority).
+  /// Bullets and explosions always draw on top.
+  static const _planetPriority = 100;
+  static const _effectPriority = 1 << 20;
+
   final GitService _service;
   final StatsService _stats;
 
@@ -94,7 +99,8 @@ class GitFightGame extends FlameGame {
   @override
   Future<void> onLoad() async {
     camera.backdrop.add(Starfield());
-    _planet = Planet(radius: _planetRadius, position: Vector2.zero());
+    _planet = Planet(radius: _planetRadius, position: Vector2.zero())
+      ..priority = _planetPriority;
     world.add(_planet);
     camera.viewfinder.anchor = Anchor.center;
     _fitCamera();
@@ -458,7 +464,10 @@ class GitFightGame extends FlameGame {
       _fire(shooterShip, targetPos, () {
         shooter.score++;
         _refreshLabels([shooter]);
-        world.add(Explosion(position: targetPos, color: target.color));
+        world.add(
+          Explosion(position: targetPos, color: target.color)
+            ..priority = _effectPriority,
+        );
       });
       shooterShip.aimAt(targetPos);
     } else {
@@ -469,7 +478,8 @@ class GitFightGame extends FlameGame {
         _refreshLabels([shooter]);
         _planet.registerHit();
         world.add(
-          Explosion(position: _surfacePoint(from), color: shooter.color),
+          Explosion(position: _surfacePoint(from), color: shooter.color)
+            ..priority = _effectPriority,
         );
       });
       shooterShip.aimAt(aim);
@@ -574,7 +584,7 @@ class GitFightGame extends FlameGame {
         target: target,
         color: shooter.color,
         onHit: onHit,
-      ),
+      )..priority = _effectPriority,
     );
   }
 

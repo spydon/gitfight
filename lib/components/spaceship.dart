@@ -34,6 +34,10 @@ class Spaceship extends PositionComponent {
   static const _engineColor = Color(0xFF8FE3FF);
   static const _flameColor = Color(0xFFFFD166);
 
+  /// Distance from the centre within which the ship keeps its current depth
+  /// priority (just clears the planet, which is at the origin).
+  static const _planetClearance = 80.0;
+
   late final TextComponent _outline;
   late final TextComponent _label;
   int _score = 0;
@@ -242,6 +246,13 @@ class Spaceship extends PositionComponent {
 
     final s = scale.x + (_depthScale - scale.x) * math.min(1, dt * 4);
     scale.setValues(s, s);
+    // Depth ordering: smaller (further) ships fall behind the planet, larger
+    // (closer) ones stay in front. The planet sits at scale 1 -> priority 100.
+    // Only re-decide front/behind while clear of the planet, so a ship doesn't
+    // flip (and flicker) as it passes over it. Flame only reorders on change.
+    if (position.length2 > _planetClearance * _planetClearance) {
+      priority = (s * 100).round();
+    }
   }
 
   void _updateLeaving(double dt) {

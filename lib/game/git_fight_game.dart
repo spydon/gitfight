@@ -259,8 +259,7 @@ class GitFightGame extends FlameGame {
       final targetPos = target.ship!.position.clone();
       _fire(shooterShip, targetPos, () {
         shooter.score++;
-        target.score++;
-        _refreshLabels([shooter, target]);
+        _refreshLabels([shooter]);
         world.add(Explosion(position: targetPos, color: target.color));
       });
       shooterShip.aimAt(targetPos);

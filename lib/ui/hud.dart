@@ -48,7 +48,7 @@ class Hud extends StatelessWidget {
               children: [_datePanel(), const Spacer(), _leaderboard()],
             ),
             const Spacer(),
-            _controls(),
+            SizedBox(width: double.infinity, child: _controls()),
           ],
         ),
       ),

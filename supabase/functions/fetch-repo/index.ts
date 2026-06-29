@@ -122,11 +122,14 @@ async function fetchGitHub(repo: Repo): Promise<Commit[]> {
     for (const item of list) {
       const author = item.commit?.author ?? {};
       const ghUser = item.author ?? null;
-      const name: string = ghUser?.login ?? author.name ?? "unknown";
+      const login: string | null = ghUser?.login ?? null;
+      const name: string = login ?? author.name ?? "unknown";
       const email: string = author.email ?? name;
+      // Group by the GitHub account so one person committing under several
+      // emails is a single committer.
       commits.push({
         name,
-        key: email.toLowerCase(),
+        key: (login ?? email).toLowerCase(),
         date: author.date,
         profileUrl: ghUser?.html_url ?? null,
       });
@@ -185,11 +188,12 @@ async function fetchBitbucket(repo: Repo): Promise<Commit[]> {
       const lt = raw.indexOf("<");
       const gt = raw.indexOf(">");
       const email = lt >= 0 && gt > lt ? raw.slice(lt + 1, gt) : raw;
+      const account: string | null = user?.nickname ?? user?.display_name ?? null;
       const name: string =
-        user?.nickname ?? user?.display_name ?? (lt > 0 ? raw.slice(0, lt).trim() : raw.trim());
+        account ?? (lt > 0 ? raw.slice(0, lt).trim() : raw.trim());
       commits.push({
         name,
-        key: email.toLowerCase(),
+        key: (account ?? email).toLowerCase(),
         date: item.date,
         profileUrl: user?.links?.html?.href ?? null,
       });

@@ -344,9 +344,12 @@ class GitService {
     final ghUser = item['author'] as Map<String, dynamic>?;
     final name = (author?['name'] as String?) ?? 'unknown';
     final email = (author?['email'] as String?) ?? name;
+    // Group by the GitHub account so one person who commits under several
+    // emails is still a single committer (one ship).
+    final login = ghUser?['login'] as String?;
     return GitCommit(
-      displayName: (ghUser?['login'] as String?) ?? name,
-      identityKey: email.toLowerCase(),
+      displayName: login ?? name,
+      identityKey: (login ?? email).toLowerCase(),
       date: DateTime.parse(author?['date'] as String),
       avatarUrl: ghUser?['avatar_url'] as String?,
       profileUrl: ghUser?['html_url'] as String?,
@@ -367,16 +370,15 @@ class GitService {
     final author = item['author'] as Map<String, dynamic>?;
     final user = author?['user'] as Map<String, dynamic>?;
     final raw = (author?['raw'] as String?) ?? 'unknown';
-    final name =
-        (user?['nickname'] as String?) ??
-        (user?['display_name'] as String?) ??
-        _nameFromRaw(raw);
+    final account =
+        (user?['nickname'] as String?) ?? (user?['display_name'] as String?);
+    final name = account ?? _nameFromRaw(raw);
     final links = user?['links'] as Map<String, dynamic>?;
     final avatar = links?['avatar'] as Map<String, dynamic>?;
     final html = links?['html'] as Map<String, dynamic>?;
     return GitCommit(
       displayName: name,
-      identityKey: _emailFromRaw(raw).toLowerCase(),
+      identityKey: (account ?? _emailFromRaw(raw)).toLowerCase(),
       date: DateTime.parse(item['date'] as String),
       avatarUrl: avatar?['href'] as String?,
       profileUrl: html?['href'] as String?,

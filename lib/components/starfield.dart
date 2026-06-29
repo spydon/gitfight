@@ -11,41 +11,40 @@ class Starfield extends Component with HasGameReference {
   final _random = math.Random(42);
   late final List<_Star> _stars;
 
+  final Paint _backgroundPaint = Paint()..color = const Color(0xFF05060D);
+  final Paint _starPaint = Paint();
+
   @override
   Future<void> onLoad() async {
-    _stars = List.generate(
-      starCount,
-      (_) => _Star(
+    _stars = List.generate(starCount, (_) {
+      final brightness = _random.nextDouble() * 0.6 + 0.2;
+      return _Star(
         Offset(_random.nextDouble(), _random.nextDouble()),
         _random.nextDouble() * 1.4 + 0.3,
-        _random.nextDouble() * 0.6 + 0.2,
-      ),
-    );
+        const Color(0xFFFFFFFF).withValues(alpha: brightness),
+      );
+    });
   }
 
   @override
   void render(Canvas canvas) {
     final size = game.size;
-    canvas.drawRect(
-      Offset.zero & size.toSize(),
-      Paint()..color = const Color(0xFF05060D),
-    );
-    final paint = Paint()..color = const Color(0xFFFFFFFF);
+    canvas.drawRect(Offset.zero & size.toSize(), _backgroundPaint);
     for (final star in _stars) {
-      paint.color = const Color(0xFFFFFFFF).withValues(alpha: star.brightness);
+      _starPaint.color = star.color;
       canvas.drawCircle(
         Offset(star.fraction.dx * size.x, star.fraction.dy * size.y),
         star.radius,
-        paint,
+        _starPaint,
       );
     }
   }
 }
 
 class _Star {
-  _Star(this.fraction, this.radius, this.brightness);
+  _Star(this.fraction, this.radius, this.color);
 
   final Offset fraction;
   final double radius;
-  final double brightness;
+  final Color color;
 }

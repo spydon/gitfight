@@ -13,7 +13,36 @@ class Planet extends PositionComponent {
   double _spin = 0;
   double _hitPulse = 0;
 
+  static const _glowColor = Color(0xFF3A6EA5);
+
+  late final Paint _bodyPaint;
+  late final Paint _bandPaint;
+  late final Shader _restingGlow;
+  late final Rect _bandRect;
+  final Paint _glowPaint = Paint();
+
   void registerHit() => _hitPulse = 1;
+
+  @override
+  Future<void> onLoad() async {
+    final center = Offset(radius, radius);
+    _bodyPaint = Paint()
+      ..shader = Gradient.radial(
+        Offset(radius * 0.7, radius * 0.7),
+        radius * 1.3,
+        const [Color(0xFF6FB1E0), Color(0xFF1B3A5B)],
+      );
+    _bandPaint = Paint()
+      ..color = const Color(0xFF234A6E).withValues(alpha: 0.5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = radius * 0.12;
+    _restingGlow = Gradient.radial(center, radius * 1.4, [
+      _glowColor.withValues(alpha: 0.55),
+      _glowColor.withValues(alpha: 0),
+    ]);
+    _glowPaint.shader = _restingGlow;
+    _bandRect = Rect.fromCircle(center: center, radius: radius * 0.85);
+  }
 
   @override
   void update(double dt) {
@@ -27,39 +56,23 @@ class Planet extends PositionComponent {
   @override
   void render(Canvas canvas) {
     final center = Offset(radius, radius);
-    final glowRadius = radius * (1.4 + _hitPulse * 0.25);
-    final glow = Paint()
-      ..shader = Gradient.radial(center, glowRadius, [
-        const Color(0xFF3A6EA5).withValues(alpha: 0.55 + _hitPulse * 0.3),
-        const Color(0x003A6EA5),
+    double glowRadius;
+    if (_hitPulse > 0) {
+      // Rebuild the glow only during the brief hit flash.
+      glowRadius = radius * (1.4 + _hitPulse * 0.25);
+      _glowPaint.shader = Gradient.radial(center, glowRadius, [
+        _glowColor.withValues(alpha: 0.55 + _hitPulse * 0.3),
+        _glowColor.withValues(alpha: 0),
       ]);
-    canvas.drawCircle(center, glowRadius, glow);
+    } else {
+      glowRadius = radius * 1.4;
+      _glowPaint.shader = _restingGlow;
+    }
+    canvas.drawCircle(center, glowRadius, _glowPaint);
+    canvas.drawCircle(center, radius, _bodyPaint);
 
-    final body = Paint()
-      ..shader = Gradient.radial(
-        Offset(radius * 0.7, radius * 0.7),
-        radius * 1.3,
-        [const Color(0xFF6FB1E0), const Color(0xFF1B3A5B)],
-      );
-    canvas.drawCircle(center, radius, body);
-
-    // A couple of rotating bands so the planet feels alive.
-    final band = Paint()
-      ..color = const Color(0xFF2C5A82).withValues(alpha: 0.6)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = radius * 0.12;
     for (var i = 0; i < 3; i++) {
-      final offset = math.sin(_spin + i) * radius * 0.4;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius * 0.85),
-        _spin + i,
-        1.2,
-        false,
-        band..color = const Color(0xFF234A6E).withValues(alpha: 0.5),
-      );
-      canvas.save();
-      canvas.translate(0, offset);
-      canvas.restore();
+      canvas.drawArc(_bandRect, _spin + i, 1.2, false, _bandPaint);
     }
   }
 }

@@ -13,6 +13,9 @@ class Explosion extends PositionComponent {
   static const _lifetime = 0.4;
   double _age = 0;
 
+  final Paint _ringPaint = Paint()..style = PaintingStyle.stroke;
+  final Paint _corePaint = Paint();
+
   @override
   void update(double dt) {
     super.update(dt);
@@ -25,18 +28,11 @@ class Explosion extends PositionComponent {
   @override
   void render(Canvas canvas) {
     final t = (_age / _lifetime).clamp(0.0, 1.0);
-    canvas.drawCircle(
-      Offset.zero,
-      maxRadius * t,
-      Paint()
-        ..color = color.withValues(alpha: (1 - t) * 0.8)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3 * (1 - t),
-    );
-    canvas.drawCircle(
-      Offset.zero,
-      maxRadius * t * 0.5,
-      Paint()..color = color.withValues(alpha: (1 - t) * 0.5),
-    );
+    _ringPaint
+      ..color = color.withValues(alpha: (1 - t) * 0.8)
+      ..strokeWidth = 3 * (1 - t);
+    canvas.drawCircle(Offset.zero, maxRadius * t, _ringPaint);
+    _corePaint.color = color.withValues(alpha: (1 - t) * 0.5);
+    canvas.drawCircle(Offset.zero, maxRadius * t * 0.5, _corePaint);
   }
 }

@@ -30,7 +30,10 @@ class Planet extends PositionComponent {
       ..shader = Gradient.radial(
         Offset(radius * 0.7, radius * 0.7),
         radius * 1.3,
-        const [Color(0xFF6FB1E0), Color(0xFF1B3A5B)],
+        [
+          const Color(0xFF6FB1E0).withValues(alpha: 0.8),
+          const Color(0xFF1B3A5B).withValues(alpha: 0.8),
+        ],
       );
     _bandPaint = Paint()
       ..color = const Color(0xFF234A6E).withValues(alpha: 0.5)

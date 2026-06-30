@@ -105,12 +105,13 @@ function githubHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function fetchGitHub(repo: Repo): Promise<Commit[]> {
+async function fetchGitHub(repo: Repo, since?: string): Promise<Commit[]> {
   const commits: Commit[] = [];
+  const sinceParam = since ? `&since=${encodeURIComponent(since)}` : "";
   for (let page = 1; ; page++) {
     const url =
       `https://api.github.com/repos/${repo.owner}/${repo.name}/commits` +
-      `?per_page=${PER_PAGE}&page=${page}`;
+      `?per_page=${PER_PAGE}&page=${page}${sinceParam}`;
     let list: any[];
     try {
       list = await getJson(url, githubHeaders());
@@ -139,13 +140,14 @@ async function fetchGitHub(repo: Repo): Promise<Commit[]> {
   return commits;
 }
 
-async function fetchGitLab(repo: Repo): Promise<Commit[]> {
+async function fetchGitLab(repo: Repo, since?: string): Promise<Commit[]> {
   const encoded = encodeURIComponent(repo.owner);
   const commits: Commit[] = [];
+  const sinceParam = since ? `&since=${encodeURIComponent(since)}` : "";
   for (let page = 1; ; page++) {
     const url =
       `https://gitlab.com/api/v4/projects/${encoded}/repository/commits` +
-      `?per_page=${PER_PAGE}&page=${page}`;
+      `?per_page=${PER_PAGE}&page=${page}${sinceParam}`;
     let list: any[];
     try {
       list = await getJson(url);
@@ -169,11 +171,13 @@ async function fetchGitLab(repo: Repo): Promise<Commit[]> {
   return commits;
 }
 
-async function fetchBitbucket(repo: Repo): Promise<Commit[]> {
+async function fetchBitbucket(repo: Repo, since?: string): Promise<Commit[]> {
   const commits: Commit[] = [];
   let url: string | null =
     `https://api.bitbucket.org/2.0/repositories/${repo.owner}/${repo.name}/commits?pagelen=${PER_PAGE}`;
-  while (url) {
+  // Bitbucket has no "since" param and returns newest first, so stop paging
+  // once we reach commits at or before the cutoff.
+  outer: while (url) {
     let body: any;
     try {
       body = await getJson(url);
@@ -182,6 +186,7 @@ async function fetchBitbucket(repo: Repo): Promise<Commit[]> {
       throw e;
     }
     for (const item of body.values ?? []) {
+      if (since && item.date <= since) break outer;
       const author = item.author ?? {};
       const user = author.user ?? null;
       const raw: string = author.raw ?? "unknown";
@@ -203,14 +208,14 @@ async function fetchBitbucket(repo: Repo): Promise<Commit[]> {
   return commits;
 }
 
-async function fetchCommits(repo: Repo): Promise<Commit[]> {
+async function fetchCommits(repo: Repo, since?: string): Promise<Commit[]> {
   switch (repo.host) {
     case "github":
-      return fetchGitHub(repo);
+      return fetchGitHub(repo, since);
     case "gitlab":
-      return fetchGitLab(repo);
+      return fetchGitLab(repo, since);
     case "bitbucket":
-      return fetchBitbucket(repo);
+      return fetchBitbucket(repo, since);
   }
 }
 
@@ -251,11 +256,26 @@ Deno.serve(async (req) => {
       return json({ cached: false, miss: true, launches });
     }
 
-    const commits = await fetchCommits(repo);
+    // Refresh incrementally: keep the cached commits and only fetch the ones
+    // newer than the latest cached commit, then append. A cold cache does a
+    // full fetch.
+    const existing: Commit[] = Array.isArray(cached?.commits)
+      ? cached!.commits
+      : [];
+    let commits: Commit[];
+    if (existing.length > 0) {
+      const since = existing[existing.length - 1].date;
+      const fresh = (await fetchCommits(repo, since))
+        .filter((c) => c.date > since)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      commits = existing.concat(fresh);
+    } else {
+      commits = await fetchCommits(repo);
+      commits.sort((a, b) => a.date.localeCompare(b.date));
+    }
     if (commits.length === 0) {
       throw new FetchError("No commits found for this repository.", 404);
     }
-    commits.sort((a, b) => a.date.localeCompare(b.date));
 
     await supabase.from("repo_cache").upsert({
       repo_key: repo.key,

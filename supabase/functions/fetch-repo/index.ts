@@ -264,6 +264,21 @@ Deno.serve(async (req) => {
   }
   try {
     const payload = await req.json();
+    if (payload?.debug === true) {
+      const res = await fetch(
+        "https://api.github.com/repos/flame-engine/flame/commits?per_page=1&page=1",
+        { headers: { Accept: "application/json", ...githubHeaders() } },
+      );
+      await res.body?.cancel();
+      return json({
+        tokenPresent: !!Deno.env.get("GITHUB_TOKEN"),
+        status: res.status,
+        limit: res.headers.get("x-ratelimit-limit"),
+        remaining: res.headers.get("x-ratelimit-remaining"),
+        used: res.headers.get("x-ratelimit-used"),
+        retryAfter: res.headers.get("retry-after"),
+      });
+    }
     const repo = parseRepo(payload?.url);
     // cacheOnly returns immediately on a miss so the client can stream from the
     // host instead of waiting for a full server-side fetch. count=false skips

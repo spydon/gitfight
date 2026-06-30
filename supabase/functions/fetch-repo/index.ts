@@ -14,7 +14,7 @@ const PER_PAGE = 100;
 const TTL_MS = 6 * 60 * 60 * 1000; // Re-fetch a repository at most every 6h.
 // Small gap between pages so large repos don't trip GitHub's secondary
 // (abuse) rate limit, which rejects rapid bursts even with quota left.
-const PAGE_DELAY_MS = 90;
+const PAGE_DELAY_MS = 250;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const corsHeaders = {

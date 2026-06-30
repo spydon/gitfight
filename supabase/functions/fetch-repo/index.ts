@@ -101,13 +101,29 @@ function parseRepo(rawUrl: unknown): Repo {
 }
 
 async function getJson(url: string, headers: Record<string, string> = {}) {
-  const res = await fetch(url, { headers: { Accept: "application/json", ...headers } });
-  if (res.status === 404) throw new FetchError("Repository not found (is it public?).", 404);
-  if (res.status === 403 || res.status === 429) {
-    throw new FetchError("Rate limited by the host, try again later.", 429);
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      headers: { Accept: "application/json", ...headers },
+    });
+    if (res.status === 200) return res.json();
+    await res.body?.cancel();
+    if (res.status === 404) {
+      throw new FetchError("Repository not found (is it public?).", 404);
+    }
+    if (res.status === 403 || res.status === 429) {
+      const remaining = res.headers.get("x-ratelimit-remaining");
+      const retryAfter = Number(res.headers.get("retry-after") ?? 0);
+      // Primary quota exhausted with no Retry-After: the reset is too far off
+      // to wait for. A 403/429 with quota left is a secondary (burst) limit, so
+      // back off and retry the same page.
+      if ((remaining === "0" && retryAfter === 0) || attempt >= 4) {
+        throw new FetchError("Rate limited by the host, try again later.", 429);
+      }
+      await sleep(Math.min((retryAfter || 2 ** attempt) * 1000, 15000));
+      continue;
+    }
+    throw new FetchError(`Host returned status ${res.status}.`, 502);
   }
-  if (!res.ok) throw new FetchError(`Host returned status ${res.status}.`, 502);
-  return res.json();
 }
 
 function githubHeaders(): Record<string, string> {

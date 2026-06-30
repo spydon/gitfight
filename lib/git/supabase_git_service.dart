@@ -37,7 +37,50 @@ class SupabaseGitService extends GitService {
     // Cache miss: fill it server-side for next time (without double-counting
     // the launch), and stream from the host right now.
     unawaited(_populate(rawUrl));
-    yield* streamFromHost(rawUrl);
+    final streamed = <GitCommit>[];
+    try {
+      await for (final batch in streamFromHost(rawUrl)) {
+        streamed.addAll(batch);
+        yield batch;
+      }
+    } on GitRateLimitException {
+      // Our IP hit the host's unauthenticated rate limit mid-stream. Fall back
+      // to the server cache (filled server-side, ideally with a token) for the
+      // commits we could not reach.
+      final rest = await _remainderFromCache(rawUrl, streamed);
+      if (rest.isNotEmpty) {
+        yield rest;
+      }
+    }
+  }
+
+  /// Polls the cache (which is only stored when complete) for a short while and
+  /// returns the commits newer than the last one we already streamed.
+  Future<List<GitCommit>> _remainderFromCache(
+    String rawUrl,
+    List<GitCommit> streamed,
+  ) async {
+    final since = streamed.isEmpty ? null : streamed.last.date;
+    for (var attempt = 0; attempt < 6; attempt++) {
+      try {
+        final data = await _invoke({
+          'url': rawUrl,
+          'cacheOnly': true,
+          'count': false,
+        });
+        if (data['cached'] == true) {
+          final all = _parseCommits(data);
+          if (since == null) {
+            return all;
+          }
+          return all.where((c) => c.date.isAfter(since)).toList();
+        }
+      } on Object {
+        // Keep polling; the background fill may still be running.
+      }
+      await Future<void>.delayed(const Duration(seconds: 3));
+    }
+    return const [];
   }
 
   @override

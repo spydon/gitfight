@@ -115,7 +115,7 @@ class GitService {
       try {
         list = await _getJsonList(pageUri(page));
       } on GitRateLimitException {
-        return; // Keep whatever already streamed.
+        rethrow; // Truncated; caller can fall back to the cache.
       }
       final batch = list.cast<Map<String, dynamic>>().map(_mapGitHub).toList()
         ..sort((a, b) => a.date.compareTo(b.date));
@@ -144,7 +144,7 @@ class GitService {
       try {
         list = await _getJsonList(pageUri(page));
       } on GitRateLimitException {
-        return;
+        rethrow; // Truncated; caller can fall back to the cache.
       }
       final batch = list.cast<Map<String, dynamic>>().map(_mapGitLab).toList()
         ..sort((a, b) => a.date.compareTo(b.date));

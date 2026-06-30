@@ -34,6 +34,12 @@ interface Commit {
   profileUrl: string | null;
 }
 
+// `complete` is false when the host rate-limited us before we read every page.
+interface FetchResult {
+  commits: Commit[];
+  complete: boolean;
+}
+
 class FetchError extends Error {
   constructor(message: string, readonly status = 400) {
     super(message);
@@ -105,7 +111,7 @@ function githubHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function fetchGitHub(repo: Repo, since?: string): Promise<Commit[]> {
+async function fetchGitHub(repo: Repo, since?: string): Promise<FetchResult> {
   const commits: Commit[] = [];
   const sinceParam = since ? `&since=${encodeURIComponent(since)}` : "";
   for (let page = 1; ; page++) {
@@ -116,7 +122,9 @@ async function fetchGitHub(repo: Repo, since?: string): Promise<Commit[]> {
     try {
       list = await getJson(url, githubHeaders());
     } catch (e) {
-      if (e instanceof FetchError && e.status === 429 && commits.length > 0) break;
+      if (e instanceof FetchError && e.status === 429 && commits.length > 0) {
+        return { commits, complete: false };
+      }
       throw e;
     }
     if (list.length === 0) break;
@@ -137,10 +145,10 @@ async function fetchGitHub(repo: Repo, since?: string): Promise<Commit[]> {
     }
     if (list.length < PER_PAGE) break;
   }
-  return commits;
+  return { commits, complete: true };
 }
 
-async function fetchGitLab(repo: Repo, since?: string): Promise<Commit[]> {
+async function fetchGitLab(repo: Repo, since?: string): Promise<FetchResult> {
   const encoded = encodeURIComponent(repo.owner);
   const commits: Commit[] = [];
   const sinceParam = since ? `&since=${encodeURIComponent(since)}` : "";
@@ -152,7 +160,9 @@ async function fetchGitLab(repo: Repo, since?: string): Promise<Commit[]> {
     try {
       list = await getJson(url);
     } catch (e) {
-      if (e instanceof FetchError && e.status === 429 && commits.length > 0) break;
+      if (e instanceof FetchError && e.status === 429 && commits.length > 0) {
+        return { commits, complete: false };
+      }
       throw e;
     }
     if (list.length === 0) break;
@@ -168,11 +178,12 @@ async function fetchGitLab(repo: Repo, since?: string): Promise<Commit[]> {
     }
     if (list.length < PER_PAGE) break;
   }
-  return commits;
+  return { commits, complete: true };
 }
 
-async function fetchBitbucket(repo: Repo, since?: string): Promise<Commit[]> {
+async function fetchBitbucket(repo: Repo, since?: string): Promise<FetchResult> {
   const commits: Commit[] = [];
+  let complete = true;
   let url: string | null =
     `https://api.bitbucket.org/2.0/repositories/${repo.owner}/${repo.name}/commits?pagelen=${PER_PAGE}`;
   // Bitbucket has no "since" param and returns newest first, so stop paging
@@ -182,7 +193,10 @@ async function fetchBitbucket(repo: Repo, since?: string): Promise<Commit[]> {
     try {
       body = await getJson(url);
     } catch (e) {
-      if (e instanceof FetchError && e.status === 429 && commits.length > 0) break;
+      if (e instanceof FetchError && e.status === 429 && commits.length > 0) {
+        complete = false;
+        break;
+      }
       throw e;
     }
     for (const item of body.values ?? []) {
@@ -205,10 +219,10 @@ async function fetchBitbucket(repo: Repo, since?: string): Promise<Commit[]> {
     }
     url = body.next ?? null;
   }
-  return commits;
+  return { commits, complete };
 }
 
-async function fetchCommits(repo: Repo, since?: string): Promise<Commit[]> {
+async function fetchCommits(repo: Repo, since?: string): Promise<FetchResult> {
   switch (repo.host) {
     case "github":
       return fetchGitHub(repo, since);
@@ -263,29 +277,40 @@ Deno.serve(async (req) => {
       ? cached!.commits
       : [];
     let commits: Commit[];
+    // A merge onto an already-complete cache stays complete even if the small
+    // "newer" fetch got throttled; a cold fetch is only complete if it read
+    // every page.
+    let complete: boolean;
     if (existing.length > 0) {
       const since = existing[existing.length - 1].date;
-      const fresh = (await fetchCommits(repo, since))
+      const result = await fetchCommits(repo, since);
+      const fresh = result.commits
         .filter((c) => c.date > since)
         .sort((a, b) => a.date.localeCompare(b.date));
       commits = existing.concat(fresh);
+      complete = true;
     } else {
-      commits = await fetchCommits(repo);
-      commits.sort((a, b) => a.date.localeCompare(b.date));
+      const result = await fetchCommits(repo);
+      commits = result.commits.sort((a, b) => a.date.localeCompare(b.date));
+      complete = result.complete;
     }
     if (commits.length === 0) {
       throw new FetchError("No commits found for this repository.", 404);
     }
 
-    await supabase.from("repo_cache").upsert({
-      repo_key: repo.key,
-      host: repo.host,
-      commits,
-      commit_count: commits.length,
-      fetched_at: new Date().toISOString(),
-    });
+    // Never poison the cache with a rate-limited partial history; only store a
+    // complete one. Partial results are still returned to the caller.
+    if (complete) {
+      await supabase.from("repo_cache").upsert({
+        repo_key: repo.key,
+        host: repo.host,
+        commits,
+        commit_count: commits.length,
+        fetched_at: new Date().toISOString(),
+      });
+    }
 
-    return json({ commits, cached: false, launches });
+    return json({ commits, cached: false, complete, launches });
   } catch (e) {
     const status = e instanceof FetchError ? e.status : 500;
     return json({ error: e instanceof Error ? e.message : String(e) }, status);

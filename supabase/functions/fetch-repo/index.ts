@@ -12,6 +12,10 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const PER_PAGE = 100;
 const TTL_MS = 6 * 60 * 60 * 1000; // Re-fetch a repository at most every 6h.
+// Small gap between pages so large repos don't trip GitHub's secondary
+// (abuse) rate limit, which rejects rapid bursts even with quota left.
+const PAGE_DELAY_MS = 90;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -115,6 +119,7 @@ async function fetchGitHub(repo: Repo, since?: string): Promise<FetchResult> {
   const commits: Commit[] = [];
   const sinceParam = since ? `&since=${encodeURIComponent(since)}` : "";
   for (let page = 1; ; page++) {
+    if (page > 1) await sleep(PAGE_DELAY_MS);
     const url =
       `https://api.github.com/repos/${repo.owner}/${repo.name}/commits` +
       `?per_page=${PER_PAGE}&page=${page}${sinceParam}`;
@@ -153,6 +158,7 @@ async function fetchGitLab(repo: Repo, since?: string): Promise<FetchResult> {
   const commits: Commit[] = [];
   const sinceParam = since ? `&since=${encodeURIComponent(since)}` : "";
   for (let page = 1; ; page++) {
+    if (page > 1) await sleep(PAGE_DELAY_MS);
     const url =
       `https://gitlab.com/api/v4/projects/${encoded}/repository/commits` +
       `?per_page=${PER_PAGE}&page=${page}${sinceParam}`;
@@ -188,7 +194,10 @@ async function fetchBitbucket(repo: Repo, since?: string): Promise<FetchResult> 
     `https://api.bitbucket.org/2.0/repositories/${repo.owner}/${repo.name}/commits?pagelen=${PER_PAGE}`;
   // Bitbucket has no "since" param and returns newest first, so stop paging
   // once we reach commits at or before the cutoff.
+  let firstPage = true;
   outer: while (url) {
+    if (!firstPage) await sleep(PAGE_DELAY_MS);
+    firstPage = false;
     let body: any;
     try {
       body = await getJson(url);
@@ -239,21 +248,6 @@ Deno.serve(async (req) => {
   }
   try {
     const payload = await req.json();
-    if (payload?.debug === true) {
-      const token = Deno.env.get("GITHUB_TOKEN");
-      const res = await fetch("https://api.github.com/rate_limit", {
-        headers: {
-          Accept: "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-      });
-      const body = await res.json().catch(() => ({}));
-      return json({
-        tokenPresent: !!token,
-        status: res.status,
-        core: body?.resources?.core ?? null,
-      });
-    }
     const repo = parseRepo(payload?.url);
     // cacheOnly returns immediately on a miss so the client can stream from the
     // host instead of waiting for a full server-side fetch. count=false skips

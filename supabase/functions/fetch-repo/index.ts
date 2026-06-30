@@ -239,6 +239,21 @@ Deno.serve(async (req) => {
   }
   try {
     const payload = await req.json();
+    if (payload?.debug === true) {
+      const token = Deno.env.get("GITHUB_TOKEN");
+      const res = await fetch("https://api.github.com/rate_limit", {
+        headers: {
+          Accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const body = await res.json().catch(() => ({}));
+      return json({
+        tokenPresent: !!token,
+        status: res.status,
+        core: body?.resources?.core ?? null,
+      });
+    }
     const repo = parseRepo(payload?.url);
     // cacheOnly returns immediately on a miss so the client can stream from the
     // host instead of waiting for a full server-side fetch. count=false skips
